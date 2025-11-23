@@ -1,0 +1,17 @@
+chainlit
+ollama
+python-dotenv
+elevenlabs
+beautifulsoup4
+python-magic
+pymupdf
+python-docx
+ddgs
+numpy
+asyncpg
+SQLAlchemy
+aiohttp
+azure-identity 
+azure-storage-file-datalake 
+greenlet
+azure-ai-inference

@@ -1,0 +1,26 @@
+[project]
+name = "ollama-chainlit-application"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "aiohttp>=3.13.2",
+    "asyncpg>=0.30.0",
+    "azure-ai-inference>=1.0.0b9",
+    "azure-identity>=1.25.1",
+    "azure-storage-file-datalake>=12.22.0",
+    "beautifulsoup4>=4.14.2",
+    "chainlit>=2.9.0",
+    "ddgs>=9.9.1",
+    "elevenlabs>=2.23.0",
+    "greenlet>=3.2.4",
+    "numpy>=2.3.5",
+    "ollama>=0.6.1",
+    "pymupdf>=1.26.6",
+    "pytesseract>=0.3.13",
+    "python-docx>=1.2.0",
+    "python-dotenv>=1.2.1",
+    "python-magic>=0.4.27",
+    "sqlalchemy>=2.0.44",
+]
