@@ -1,0 +1,5 @@
+# Override GitHub language detection
+*.ipynb linguist-detectable=false
+
+# Ensure Python files are counted as the main language
+*.py linguist-detectable=true
