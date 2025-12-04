@@ -9,6 +9,7 @@ from src.utils.config import (
 
 logger = setup_logger('CALL MODEL')
 
+@cl.step(name="ollama", type="tool", show_input=False)
 async def call_ollama(model, messages) -> str:
     """
     Calls the Ollama model with the provided messages and handles tool calls via MCP.
