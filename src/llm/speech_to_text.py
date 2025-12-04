@@ -51,6 +51,7 @@ async def process_audio() -> bytes:
 
     return wav_buffer.getvalue()
 
+@cl.step(name="audio", type="tool", show_input=False)
 async def speech_to_text(audio_file: bytes) -> str:
     """Enhanced transcription with multiple engines and languages"""
     elevenlabs = AsyncElevenLabs(
