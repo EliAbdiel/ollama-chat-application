@@ -3,7 +3,9 @@ import chainlit as cl
 from mcp import ClientSession
 from typing import Dict, Optional
 from chainlit.types import ThreadDict
+from src.utils.config import COMMANDS
 from src.log.logger import setup_logger
+from src.ui.commands import command_list
 from src.ui.chat_resume import resume_chats
 from src.ui.chat_profiles import list_of_profiles
 from src.llm.call_model import call_ollama, model_name
@@ -81,6 +83,10 @@ async def on_chat_start() -> None:
     cl.user_session.set("chat_history", [])
     cl.user_session.set("mcp_tools", {})
     cl.user_session.set("audio_buffer", None)
+
+    commands = await command_list()
+
+    await cl.context.emitter.set_commands(commands)
 
     user = cl.user_session.get("user")
     user.metadata["chat_profile"] = cl.user_session.get("chat_profile")
@@ -175,7 +181,7 @@ async def on_message(user_message: cl.Message) -> None:
     user_message : Message
         The incoming message with potential file attachments.
     """
-    if not user_message or not user_message.content:
+    if not user_message:
         logger.error("Received invalid or None message")
         return
     
@@ -190,7 +196,7 @@ async def on_message(user_message: cl.Message) -> None:
 
         file = docs[0] if docs else None
 
-        if not file or file is None:
+        if not file:
             logger.warning("No valid document files found")
             raise ValueError("No valid document files found")
         
@@ -201,7 +207,17 @@ async def on_message(user_message: cl.Message) -> None:
         extracted_content = await processor.process_single_file_async(file=file)
         
         if extracted_content:
-            user_message.content += f"\n\n{extracted_content}"
+            if user_message.command in COMMANDS:
+                logger.info(f"Processing user message: {len(extracted_content)} characters, with command: {user_message.command}")
+                await cl.Message(content=extracted_content).send()
+                return
+
+            user_message.content = f"""
+            INSTRUCTION:
+            {user_message.content}
+            
+            DOCUMENT CONTEXT:
+            {extracted_content}"""
             logger.info("Appended extracted content to user message")
     
     user = cl.user_session.get("user")
@@ -223,18 +239,19 @@ async def on_message(user_message: cl.Message) -> None:
 
     try:
 
-        response = await call_ollama(model=model, messages=chat_history)
+        if user_message.command in COMMANDS or user_message.command is None:
+            logger.info(f"Processing user message: {user_message.content}, with command: {user_message.command}")
+            response = await call_ollama(model=model, messages=chat_history)
         
-        if response:
-            chat_history.append({"role": "assistant", "content": response})
-            logger.info(f"Chat history after call llm: {chat_history}")
-            cl.user_session.set("chat_history", chat_history)
-            await cl.Message(content=response).send()
-
-        else:
+        if not response:
             logger.warning("Empty response from Ollama")
             await cl.Message(content="I apologize, but I couldn't generate a response. Please try again.").send()
     
+        chat_history.append({"role": "assistant", "content": response})
+        logger.info(f"Chat history after call llm: {chat_history}")
+        cl.user_session.set("chat_history", chat_history)
+        await cl.Message(content=response).send()
+
     except Exception as e:
         logger.error(f"Unexpected error in on_message: {e}")
         await cl.Message(content="An unexpected error occurred. Please try again.").send()
