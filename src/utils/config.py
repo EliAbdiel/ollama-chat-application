@@ -3,6 +3,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+COMMANDS = {"Search", "Chat", "Summary"}
+
 OLLAMA_API_KEY=os.environ["OLLAMA_SECRET_KEY"]
 OLLAMA_BASE_URL=os.environ["OLLAMA_BASE_URL"]
 DEFAULT_MODEL=os.environ["DEFAULT_MODEL"]
