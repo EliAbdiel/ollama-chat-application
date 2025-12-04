@@ -1,16 +1,13 @@
 import fitz
 import base64
 import asyncio
-import aiofiles
-import subprocess
 import chainlit as cl
 from io import BytesIO
 from pathlib import Path
 from docx import Document
 from ollama import AsyncClient
-from typing import Optional, Set
 from src.log.logger import setup_logger
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, Set
 from src.document.processor_config import ProcessingConfig
 from src.utils.config import OLLAMA_BASE_URL, OLLAMA_API_KEY
 
@@ -91,7 +88,7 @@ class DocumentProcessor:
 
         return file_info
 
-    async def _clean_and_summarize_text(self, text: str, doc_type: str = "document") -> str:
+    async def _clean_and_summarize_text(self, text: str, filename: str, doc_type: str = "document") -> str:
         """
         Clean and summarize text using Ollama.
         Enhanced with better prompts and error handling.
@@ -101,41 +98,78 @@ class DocumentProcessor:
 
         try:
             # Enhanced prompt for better summarization
-            prompt = f"""
-                You are an expert assistant specialized in summarizing {doc_type} content.
+            system_instruction = f"""You are a summarization assistant specialized in long-form content.
 
-                Your task is to create a structured, accurate, and concise summary.  
-                Analyze the document carefully and produce the following:
+            Input context
+            - **Filename**: "{filename}"
+            - **Document Category**: "{doc_type}"
 
-                1. **Summary:**  
-                - A clear and concise overview capturing the main ideas and purpose.
+            When summarizing, you must:
+            - Preserve original meaning, intent, and logical flow
+            - Extract only the most relevant information
+            - Remove redundancy while keeping factual accuracy
+            - Use clear, structured, concise language
 
-                2. **Key Points & Facts:**  
-                - Extract the most relevant information, data, arguments, or findings.
-                - Use bullet points for readability.
+            Constraints:
+            - No opinions, assumptions, or invented facts
+            - No altering context beyond compression
+            - If ambiguous, summarize only what is certain
 
-                3. **Context & Importance:**  
-                - Explain why the content matters or what it is intended for.
+            Tone & Style:
+            - Neutral, professional, short, clear, direct
+            - Summary length: 10–30% of original
+            - Always end with a 1-sentence summary (≤20 words)
 
-                4. **Actionable Insights / Conclusions:**  
-                - Highlight any decisions, recommendations, next steps, or implications.
+            Mandatory Output Format:
+            1. Title (only if original had one)
+            *Short, accurate summary title*
 
-                **Guidelines:**  
-                - Preserve essential meaning and details.  
-                - Avoid unnecessary filler or repetition.  
-                - Use simple, easy-to-understand language.  
-                - Maintain neutrality and do not add external information.
+            2. Executive Summary (1 paragraph, 3–5 sentences)
+            *Concise overview of full content*
 
-                ---
+            3. Main Points (bullet list, 3+ key ideas)
+            - Key idea 1
+            - Key idea 2
+            - Key idea 3
+            - Additional essential details if needed
 
-                **Content to summarize:**  
-                {text}
-                """
+            4. Section Breakdown (only if original had multiple topics)
+            **Section A — Topic**
+            - Highlight 1
+            - Highlight 2
+
+            **Section B — Topic**
+            - Highlight 1
+            - Highlight 2
+
+            5. Important Data & Facts (only if useful)
+            | Fact/Metric | Detail |
+            |:-----------:|:------:|
+            | Example     | Result |
+
+            6. Key Takeaways (3–5 insights)
+            ✅ Insight 1  
+            ✅ Insight 2  
+            ✅ Insight 3  
+
+            7. One-Sentence Summary (≤20 words)
+            *Factual compression of entire content*
+
+            8. Tags (only if original topics are identifiable)
+            topic1, topic2
+
+            Final Rules:
+            - Follow the format exactly
+            - Always include sections 2, 3, 6, 7
+            - Exclude optional sections if they add no value
+            - Make the summary scannable and fact-driven"""
 
             result = await self.client.chat(
                 model=self.config.ollama_model,
-                messages=[{'role': 'user', 'content': prompt}],
-                think=True,
+                messages=[
+                    {'role': 'system', 'content': system_instruction},
+                    {'role': 'user', 'content': text}
+                ],
                 options={'temperature': self.config.temperature}
             )
 
@@ -147,7 +181,7 @@ class DocumentProcessor:
             # Return original text if summarization fails
             return f"Original content:\n\n{text[:self.config.text_extract_limit]}"
 
-    async def _extract_text_from_pdf_bytes(self, pdf_bytes: bytes) -> str:
+    async def _extract_text_from_pdf_bytes(self, filename: str, pdf_bytes: bytes, pdf_mime: str) -> str:
         """
         Extract text from PDF bytes using PyMuPDF with enhanced features.
         """
@@ -172,7 +206,7 @@ class DocumentProcessor:
             # Log extraction summary
             self.logger.info(f"Extracted {len(text)} characters from PDF")
 
-            result = await self._clean_and_summarize_text(text=text[:self.config.text_extract_limit], doc_type="PDF")
+            result = await self._clean_and_summarize_text(text=text[:self.config.text_extract_limit], filename=filename, doc_type=pdf_mime)
 
             return result
 
@@ -180,7 +214,7 @@ class DocumentProcessor:
             self.logger.error(f"Error processing PDF: {str(e)}")
             raise ValueError(f"Failed to process PDF: {str(e)}")
 
-    async def _extract_text_from_docx_bytes(self, docx_bytes: bytes) -> str:
+    async def _extract_text_from_docx_bytes(self, filename: str, docx_bytes: bytes, docx_mime: str) -> str:
         """
         Extract text from DOCX bytes with enhanced features.
         """
@@ -203,7 +237,7 @@ class DocumentProcessor:
 
             self.logger.info(f"Extracted {len(text)} characters from DOCX")
 
-            result = await self._clean_and_summarize_text(text=text[:self.config.text_extract_limit].strip(), doc_type="DOCX")
+            result = await self._clean_and_summarize_text(text=text[:self.config.text_extract_limit].strip(), filename=filename, doc_type=docx_mime)
 
             return result
 
@@ -211,7 +245,7 @@ class DocumentProcessor:
             self.logger.error(f"Error processing DOCX: {str(e)}")
             raise ValueError(f"Failed to process DOCX: {str(e)}")
 
-    async def _extract_text_from_txt_bytes(self, txt_bytes: bytes) -> str:
+    async def _extract_text_from_txt_bytes(self, filename: str, txt_bytes: bytes, txt_mime: str) -> str:
         """
         Extract text from plain text files.
         """
@@ -234,7 +268,7 @@ class DocumentProcessor:
 
             self.logger.info(f"Extracted {len(text)} characters from TXT")
 
-            result = await self._clean_and_summarize_text(text=text[:self.config.text_extract_limit], doc_type="TXT")
+            result = await self._clean_and_summarize_text(text=text[:self.config.text_extract_limit], filename=filename, doc_type=txt_mime)
 
             return result
 
@@ -242,7 +276,7 @@ class DocumentProcessor:
             self.logger.error(f"Error processing TXT: {str(e)}")
             raise ValueError(f"Failed to process text file: {str(e)}")
 
-    async def _extract_content_from_image_bytes(self, image_bytes: bytes) -> str:
+    async def _extract_content_from_image_bytes(self, filename: str, image_bytes: bytes, image_mime: str) -> str:
         """
         Extract content from image bytes using Ollama vision model.
         """
@@ -299,14 +333,15 @@ class DocumentProcessor:
 
             self.logger.info("Successfully processed image with vision model")
 
-            summary_result = await self._clean_and_summarize_text(text=result.message.content, doc_type="image")
+            result = await self._clean_and_summarize_text(text=result.message.content, filename=filename, doc_type=image_mime)
 
-            return summary_result
+            return result
 
         except Exception as e:
             self.logger.error(f"Error processing image: {str(e)}")
             raise ValueError(f"Failed to process image: {str(e)}")
-            
+    
+    @cl.step(name="document", type="tool", show_input=False)
     async def process_document_async(self, filename: str, file_bytes: bytes, file_mime: str) -> str:
         """
         Process a document and extract structured content.
@@ -335,7 +370,7 @@ class DocumentProcessor:
                 raise ValueError(f"Unsupported file extension: {file_info['extension']}")
 
             # Process the document
-            result = await processor(file_bytes)
+            result = await processor(filename, file_bytes, file_mime)
 
             self.logger.info(f"Successfully processed {filename}")
             return result
@@ -390,16 +425,41 @@ class DocumentProcessor:
 
         return results
 
-    async def process_single_file_async(self, file: cl.File) -> str:
+    async def process_single_file_async(self, file: cl.File) -> Optional[str]:
         """Helper method for async processing of a single file"""
         if file is None:
-            raise ValueError("File is None")
-        filename = str(file.name)
-        file_bytes = self._read_bytes(file=file)
-        file_mime = str(file.mime)
-        
-        self.logger.info(f"Processing single file: {filename}, size: {len(file_bytes)} bytes, mime: {file_mime}")
-        
-        content = await self.process_document_async(filename=filename, file_bytes=file_bytes, file_mime=file_mime)
-        
-        return content
+            self.logger.warning("File is None")
+            return None
+
+        try:
+            filename = str(file.name)
+            file_bytes = self._read_bytes(file=file)
+            file_mime = str(file.mime)
+            
+            self.logger.info(f"Processing single file: {filename}, size: {len(file_bytes)} bytes, mime: {file_mime}")
+            
+            content = await self.process_document_async(filename=filename, file_bytes=file_bytes, file_mime=file_mime)
+            
+            return content
+
+        except Exception as e:
+            self.logger.error(f"Error processing file: {str(e)}")
+            raise ValueError(f"Failed to process file: {str(e)}")
+
+    @cl.step(name="summarize", type="tool", show_input=False)
+    async def summarize_text(self, content: str) -> Optional[str]:
+        """
+        Summarize text using the document processor.
+
+        Args:
+            content (str): The content to summarize
+
+        Returns:
+            str: Summarized content
+        """
+        if not content:
+            self.logger.warning("Content is empty")
+            return None
+
+        self.logger.info(f"Summarizing text with length: {len(content)}")
+        return await self._clean_and_summarize_text(text=content, filename="Document", doc_type="document")
