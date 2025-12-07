@@ -9,6 +9,11 @@ from src.utils.config import (
 
 logger = setup_logger('CALL MODEL')
 
+client = AsyncClient(
+    host=OLLAMA_BASE_URL,
+    headers={"Authorization": f"Bearer {OLLAMA_API_KEY}"},
+)
+
 @cl.step(name="ollama", type="tool", show_input=False)
 async def call_ollama(model, messages) -> str:
     """
@@ -30,11 +35,6 @@ async def call_ollama(model, messages) -> str:
     logger.info(f"MCP All Tools: {all_tools}")
     logger.info(f"Available MCP Tools: {[tool['function']['name'] for tool in all_tools]}")
     
-    client = AsyncClient(
-        host=OLLAMA_BASE_URL,
-        headers={"Authorization": f"Bearer {OLLAMA_API_KEY}"},
-    )
-    
     try:
         final_response = None
 
@@ -46,7 +46,7 @@ async def call_ollama(model, messages) -> str:
                 break
 
             if result.message.content:
-                logger.info(f"Received content: {str(result.message.content)[:2000]}...")
+                logger.info(f"Received content: {str(result.message.content)[:1000]}...")
                 final_response = "\n\n".join([result.message.content])
             
             messages.append(result.message)
@@ -72,7 +72,7 @@ async def call_ollama(model, messages) -> str:
                             if mcp_name in mcp_sessions:
                                 mcp_session = mcp_sessions[mcp_name][0]
                                 tool_result = await mcp_session.call_tool(tool_name, tool_args)
-                                logger.info(f"Tool result: {str(tool_result)[:2000]}...")
+                                logger.info(f"Tool result: {str(tool_result)[:1000]}...")
 
                                 messages.append({
                                     'role': 'tool',
@@ -103,13 +103,36 @@ async def call_ollama(model, messages) -> str:
             else:
                 break  # No tool calls, conversation is complete
         if final_response is not None:
-            logger.info(f'Final Response: {final_response[:2000]}...')
+            logger.info(f'Final Response: {final_response[:1000]}...')
             return final_response
         else:
             logger.warning('No final response generated')
             return None
     except Exception as e:
         logger.error(f'Unexpected error during client initialization: {e}')
+
+
+async def thread_renamed(thread_message: str) -> None:
+    """
+    Renames the thread with the given message.
+    
+    Args:
+        thread_message (str): The new name for the thread.
+    """
+    if not cl.user_session.get("is_thread_renamed", False):
+        messages = [
+            {
+                "role": "user", 
+                "content": f"Summarize this query in MAX 8 words for a chat thread name: `{thread_message[:500]}`"
+            }
+        ]
+        
+        thread_name_response = await client.chat(model=DEFAULT_MODEL, messages=messages)
+
+        thread_name = thread_name_response.message.content
+
+        await cl.context.emitter.init_thread(thread_name)
+        cl.user_session.set("is_thread_renamed", True)
 
 async def model_name(profile:str) -> str:
     """
@@ -124,12 +147,12 @@ async def model_name(profile:str) -> str:
     model_mapping = {
         "gpt-oss:120b-cloud": "gpt-oss:120b",
         "deepseek-v3.1:671b-cloud": "deepseek-v3.1:671b",
-        "qwen3-vl:235b-cloud": "qwen3-vl:235b",
+        "gemma3:27b-cloud": "gemma3:27b",
         "qwen3-coder:480b-cloud": "qwen3-coder:480b",
         "kimi-k2:1t-cloud": "kimi-k2:1t",
         "glm-4.6:cloud": "glm-4.6",
         "minimax-m2:cloud": "minimax-m2",
-        "gemini-3-pro-preview": "gemini-3-pro-preview:latest",
+        "mistral-large-3:675b-cloud": "mistral-large-3:675b",
     }
 
     if profile in model_mapping:
