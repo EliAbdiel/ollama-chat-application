@@ -341,7 +341,6 @@ class DocumentProcessor:
             self.logger.error(f"Error processing image: {str(e)}")
             raise ValueError(f"Failed to process image: {str(e)}")
     
-    @cl.step(name="document", type="tool", show_input=False)
     async def process_document_async(self, filename: str, file_bytes: bytes, file_mime: str) -> str:
         """
         Process a document and extract structured content.
@@ -379,72 +378,49 @@ class DocumentProcessor:
             self.logger.error(f"Failed to process {filename}: {str(e)}")
             raise
 
-    def batch_process_documents(self, file_data: Dict[str, bytes]) -> Dict[str, str]:
+    @cl.step(name="document", type="tool", show_input=False)
+    async def process_multiple_files_async(self, files: list[cl.File]) -> dict:
         """
-        Process multiple documents in a batch.
+        Process multiple files and extract structured content.
 
         Args:
-            file_data (Dict[str, bytes]): Dictionary of filename -> file_bytes
+            files (list[cl.File]): List of files to process
 
         Returns:
-            Dict[str, str]: Dictionary of filename -> processed content
+            dict: Dictionary containing processed and summarized content
         """
-        results = {}
+        results = {
+            "success": {},
+            "failed": {}
+        }
 
-        for filename, file_bytes in file_data.items():
+        if not files:
+            return results
+
+        async def process_single_file(file: cl.File):
+            """
+            Helper method for async processing of a single file
+            """
             try:
-                results[filename] = self.process_document_async(filename, file_bytes)
+                filename = str(file.name)
+                file_bytes = self._read_bytes(file)
+                file_mime = str(file.mime)
+
+                self.logger.info(f"Processing file: {filename}, size: {len(file_bytes)} bytes, mime: {file_mime}")
+
+                content = await self.process_document_async(filename, file_bytes, file_mime)
+
+                results["success"][filename] = content
+
             except Exception as e:
-                results[filename] = f"Error processing {filename}: {str(e)}"
+                self.logger.error(f"Failed to process file: {str(e)}")
+                results["failed"]["Status"] = str(e)
+
+        tasks = [asyncio.create_task(process_single_file(file)) for file in files]
+
+        await asyncio.gather(*tasks)
 
         return results
-
-    async def batch_process_documents_async(self, file_data: Dict[str, bytes]) -> Dict[str, str]:
-        """
-        Process multiple documents in a batch asynchronously.
-
-        Args:
-            file_data (Dict[str, bytes]): Dictionary of filename -> file_bytes
-
-        Returns:
-            Dict[str, str]: Dictionary of filename -> processed content
-        """
-        results = {}
-
-        # Process files concurrently
-        tasks = []
-        for filename, file_bytes in file_data.items():
-            task = asyncio.create_task(self.process_single_file_async(filename, file_bytes))
-            tasks.append((filename, task))
-
-        for filename, task in tasks:
-            try:
-                results[filename] = await task
-            except Exception as e:
-                results[filename] = f"Error processing {filename}: {str(e)}"
-
-        return results
-
-    async def process_single_file_async(self, file: cl.File) -> Optional[str]:
-        """Helper method for async processing of a single file"""
-        if file is None:
-            self.logger.warning("File is None")
-            return None
-
-        try:
-            filename = str(file.name)
-            file_bytes = self._read_bytes(file=file)
-            file_mime = str(file.mime)
-            
-            self.logger.info(f"Processing single file: {filename}, size: {len(file_bytes)} bytes, mime: {file_mime}")
-            
-            content = await self.process_document_async(filename=filename, file_bytes=file_bytes, file_mime=file_mime)
-            
-            return content
-
-        except Exception as e:
-            self.logger.error(f"Error processing file: {str(e)}")
-            raise ValueError(f"Failed to process file: {str(e)}")
 
     @cl.step(name="summarize", type="tool", show_input=False)
     async def summarize_text(self, content: str) -> Optional[str]:
