@@ -1,14 +1,14 @@
 import json
 import chainlit as cl
 from mcp import ClientSession
-from typing import Dict, Optional
-from chainlit.types import ThreadDict
 from src.utils.config import COMMANDS
+from chainlit.types import ThreadDict
+from typing import Dict, Optional, Any
 from src.log.logger import setup_logger
 from src.ui.commands import command_list
 from src.ui.chat_resume import resume_chats
 from src.ui.chat_profiles import list_of_profiles
-from src.llm.call_model import call_ollama, model_name
+from src.llm.call_model import call_ollama, thread_renamed, model_name
 from src.document.document_processor import DocumentProcessor
 from src.database.persistent_data_layer import init_data_layer
 from src.llm.speech_to_text import audio_chunk, audio_transcription
@@ -22,8 +22,17 @@ def oauth_callback(
   raw_user_data: Dict[str, str],
   default_user: cl.User,
 ) -> Optional[cl.User]:
-  """Callback function for OAuth authentication."""
-  return default_user
+    """
+    Callback function for OAuth authentication. Returns the default user.
+    """
+    return default_user
+
+@cl.on_shared_thread_view
+async def on_shared_thread_view(thread: Dict[str, Any], current_user: cl.User) -> bool:
+    """
+    Handles shared thread views. Returns True if the thread is shared successfully.
+    """
+    return True
 
 @cl.step(type="tool") 
 async def call_tool(tool_name: str, tool_args: dict):
@@ -83,6 +92,7 @@ async def on_chat_start() -> None:
     cl.user_session.set("chat_history", [])
     cl.user_session.set("mcp_tools", {})
     cl.user_session.set("audio_buffer", None)
+    cl.user_session.set("is_mcp_connected", False)
 
     commands = await command_list()
 
@@ -119,9 +129,32 @@ async def on_mcp(connection, session: ClientSession):
     logger.info(f"Connected MCP: {mcp_tools}")
     cl.user_session.set("mcp_tools", mcp_tools)
 
+    cl.user_session.set("is_mcp_connected", True)
+    logger.info("MCP connected successfuly")    
+
+@cl.on_mcp_disconnect
+async def on_mcp_disconnect(name: str, session: ClientSession):
+    """
+    Called when an MCP connection is terminated. Removes the MCP tools from the user session.
+    """
+    mcp_tools = cl.user_session.get("mcp_tools", {})
+    if name in mcp_tools:
+        del mcp_tools[name]
+        cl.user_session.set("mcp_tools", mcp_tools)
+
+    cl.user_session.set("is_mcp_connected", False)
+    logger.info(f"Disconnected from MCP server: {name}")
+
 @cl.on_audio_start
 async def on_audio_start():
-    """Handles the start of audio input from the user."""
+    """
+    Handles the start of audio input from the user.
+    
+    Returns:
+    -------
+    bool
+        True if the audio input is successfully started.
+    """
     cl.user_session.set("audio_chunks", [])
     return True
 
@@ -160,8 +193,10 @@ async def on_audio_end() -> None:
         )
         
         await user_message.send()
+        await thread_renamed(transcription)
         await on_message(user_message)
         return True
+
     except Exception as e:
         logger.error(f"Error processing audio end: {e}")
         await cl.Message(content=f"Audio processing error. Please try again.").send()
@@ -189,36 +224,50 @@ async def on_message(user_message: cl.Message) -> None:
         logger.info("Processing user message with attached files")
         
         docs = [
-            f
-            for f in user_message.elements
-            if str(f.name).lower().endswith((".pdf", ".docx", ".txt", ".jpg", ".jpeg", ".png"))
+            file
+            for file in user_message.elements
+            if str(file.name).lower().endswith((".pdf", ".docx", ".txt", ".jpg", ".jpeg", ".png"))
         ]
 
-        file = docs[0] if docs else None
-
-        if not file:
+        if not docs:
             logger.warning("No valid document files found")
-            raise ValueError("No valid document files found")
+            await cl.Message(content="No valid document files found. Please attach a valid document file (PDF, DOCX, TXT, JPG, JPEG, PNG).").send()
+            return
         
-        logger.info(f"Found document file: {str(file.name)}, mime: {str(file.mime)}")
+        logger.info(f"Found {len(docs)} document file(s)")
 
         # Process the document
         processor = DocumentProcessor()    
-        extracted_content = await processor.process_single_file_async(file=file)
+        results = await processor.process_multiple_files_async(docs)
         
-        if extracted_content:
-            if user_message.command in COMMANDS:
-                logger.info(f"Processing user message: {len(extracted_content)} characters, with command: {user_message.command}")
-                await cl.Message(content=extracted_content).send()
-                return
+        combined_content = ""
+        for filename, content in results["success"].items():
+            combined_content += (
+                f"\n====================\n"
+                f"FILE: {filename}\n"
+                f"====================\n"
+                f"{content}\n"
+            )
 
-            user_message.content = f"""
-            INSTRUCTION:
-            {user_message.content}
-            
-            DOCUMENT CONTEXT:
-            {extracted_content}"""
-            logger.info("Appended extracted content to user message")
+        if not combined_content:
+            logger.warning("All files failed to process")
+            await cl.Message(content="All files failed to process. Please try again.").send()
+            return
+
+        if user_message.command in COMMANDS:
+            logger.info(f"Processing user command: {user_message.command}, with {len(results['success'])} file summaries")
+            await cl.Message(content=combined_content).send()
+            logger.info("Sent file summaries to user successfully")
+            return
+
+        user_message.content = (
+            "INSTRUCTION:\n"
+            f"{user_message.content}\n\n"
+            "DOCUMENT CONTEXT:\n"
+            f"{combined_content}"
+        )
+        
+        logger.info("Appended extracted content to user message")
     
     user = cl.user_session.get("user")
     chat_profile = user.metadata["chat_profile"]
