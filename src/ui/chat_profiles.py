@@ -26,8 +26,14 @@ async def list_of_profiles(current_user:cl.User) -> list[cl.ChatProfile]:
             starters=await list_of_starter(),
         ),
         cl.ChatProfile(
-            name="qwen3-vl:235b-cloud",
-            markdown_description="The underlying LLM model is **Qwen3-vl**.",
+            name="gemma3:27b-cloud",
+            markdown_description="The underlying LLM model is **Gemma3**.",
+            icon="public/model/gemma.svg",
+            starters=await list_of_starter(),
+        ),
+        cl.ChatProfile(
+            name="qwen3-coder:480b-cloud",
+            markdown_description="The underlying LLM model is **Qwen3-Coder**.",
             icon="public/model/qwen.svg",
             starters=await list_of_starter(),
         ),
@@ -50,9 +56,9 @@ async def list_of_profiles(current_user:cl.User) -> list[cl.ChatProfile]:
             starters=await list_of_starter(),
         ),
         cl.ChatProfile(
-            name="gemini-3-pro-preview",
-            markdown_description="The underlying LLM model is **Gemini 3 Pro**.",
-            icon="public/model/gemini.svg",
+            name="mistral-large-3:675b-cloud",
+            markdown_description="The underlying LLM model is **Mistral-Large-3**.",
+            icon="public/model/mistral.svg",
             starters=await list_of_starter(),
         ),
     ]
