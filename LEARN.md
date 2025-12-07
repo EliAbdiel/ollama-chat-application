@@ -4,12 +4,64 @@ This guide helps you understand, configure, and extend the Ollama-powered Chainl
 
 ## Quick Start
 
-- Install Python 3.13+ and ensure `pip` is available.
-- Install dependencies:
-   - With `pip`: `pip install .`
-   - Or with `uv` (recommended): `uv pip sync` (uses `pyproject.toml`/`uv.lock`)
-- Create and fill `.env` (see “Environment Variables”).
-- Run the app: `chainlit run main.py -w`
+### What You'll Need
+
+- [Python 3.13+](https://www.python.org/downloads/) installed
+
+- [Basic Python knowledge](https://www.geeksforgeeks.org/python/python-programming-language-tutorial/)
+
+- [uv package manager](https://docs.astral.sh/uv/getting-started/installation/)
+
+- [Ollama Cloud Account](https://ollama.com/cloud) (free tier)
+
+- [ElevenLabs API Key](https://elevenlabs.io/pricing/api)
+
+- [PostgreSQL](https://www.postgresql.org/download/)
+
+- [Create an Auth0 Application](https://auth0.com/docs/get-started/auth0-overview/create-applications)
+
+- Code editor of choice
+
+### Installation & Setup
+
+1.**Clone the Repository**
+
+```bash
+git clone https://github.com/EliAbdiel/ollama-chat-application.git
+
+cd ollama-chat-application
+```
+
+2.**Install dependencies**
+
+```bash
+uv sync
+```
+
+3.**Create and fill .env**
+
+```bash
+# Windows
+copy .env.example .env
+
+# Linux/Mac
+cp .env.example .env
+```
+
+4.**Run the app**
+
+```bash
+# Linux/Mac
+source .venv/bin/activate
+
+# Windows (CMD)
+.venv\Scripts\activate
+
+# Windows (PowerShell)
+.venv\Scripts\Activate.ps1
+
+chainlit run mani.py -w
+```
 
 ## Environment Variables
 
