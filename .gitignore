@@ -11,7 +11,5 @@ wheels/
 .env
 
 # Chainlit files
-.chainlit/
 .files/
-chainlit.md
 resources.txt
