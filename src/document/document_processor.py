@@ -5,9 +5,9 @@ import chainlit as cl
 from io import BytesIO
 from pathlib import Path
 from docx import Document
-from ollama import AsyncClient
+from ollama import AsyncClient, ChatResponse
 from src.log.logger import setup_logger
-from typing import Optional, Dict, Any, Set
+from typing import Optional, Dict, Any, Set, AsyncIterator
 from src.document.processor_config import ProcessingConfig
 from src.utils.config import OLLAMA_BASE_URL, OLLAMA_API_KEY
 
@@ -118,59 +118,18 @@ class DocumentProcessor:
             Tone & Style:
             - Neutral, professional, short, clear, direct
             - Summary length: 10–30% of original
-            - Always end with a 1-sentence summary (≤20 words)
+            - Always end with a 1-sentence summary (≤20 words)"""
 
-            Mandatory Output Format:
-            1. Title (only if original had one)
-            *Short, accurate summary title*
-
-            2. Executive Summary (1 paragraph, 3–5 sentences)
-            *Concise overview of full content*
-
-            3. Main Points (bullet list, 3+ key ideas)
-            - Key idea 1
-            - Key idea 2
-            - Key idea 3
-            - Additional essential details if needed
-
-            4. Section Breakdown (only if original had multiple topics)
-            **Section A — Topic**
-            - Highlight 1
-            - Highlight 2
-
-            **Section B — Topic**
-            - Highlight 1
-            - Highlight 2
-
-            5. Important Data & Facts (only if useful)
-            | Fact/Metric | Detail |
-            |:-----------:|:------:|
-            | Example     | Result |
-
-            6. Key Takeaways (3–5 insights)
-            ✅ Insight 1  
-            ✅ Insight 2  
-            ✅ Insight 3  
-
-            7. One-Sentence Summary (≤20 words)
-            *Factual compression of entire content*
-
-            8. Tags (only if original topics are identifiable)
-            topic1, topic2
-
-            Final Rules:
-            - Follow the format exactly
-            - Always include sections 2, 3, 6, 7
-            - Exclude optional sections if they add no value
-            - Make the summary scannable and fact-driven"""
-
-            result = await self.client.chat(
+            result: ChatResponse = await self.client.chat(
                 model=self.config.ollama_model,
                 messages=[
                     {'role': 'system', 'content': system_instruction},
                     {'role': 'user', 'content': text}
                 ],
-                options={'temperature': self.config.temperature}
+                options={
+                    'temperature': self.config.temperature,
+                    'num_ctx': self.config.num_ctx,
+                }
             )
 
             self.logger.info(f"Successfully processed {doc_type} text with Ollama")
@@ -324,16 +283,19 @@ class DocumentProcessor:
                 }
             ]
 
-            result = await self.client.chat(
+            response: ChatResponse = await self.client.chat(
                 model=self.config.vision_model,
                 messages=messages,
                 think=True,
-                options={'temperature': self.config.temperature}
+                options={
+                    'temperature': self.config.temperature,
+                    'num_ctx': self.config.num_ctx,
+                }
             )
 
             self.logger.info("Successfully processed image with vision model")
 
-            result = await self._clean_and_summarize_text(text=result.message.content, filename=filename, doc_type=image_mime)
+            result = await self._clean_and_summarize_text(text=response.message.content, filename=filename, doc_type=image_mime)
 
             return result
 
@@ -416,9 +378,14 @@ class DocumentProcessor:
                 self.logger.error(f"Failed to process file: {str(e)}")
                 results["failed"]["Status"] = str(e)
 
-        tasks = [asyncio.create_task(process_single_file(file)) for file in files]
+        tasks = []
+        for file in files:
+            current_task = asyncio.create_task(process_single_file(file))
+            tasks.append(current_task)
 
-        await asyncio.gather(*tasks)
+        async for task in asyncio.as_completed(tasks):
+            await task
+            self.logger.info("Completed processing file")
 
         return results
 
@@ -438,4 +405,4 @@ class DocumentProcessor:
             return None
 
         self.logger.info(f"Summarizing text with length: {len(content)}")
-        return await self._clean_and_summarize_text(text=content, filename="Document", doc_type="document")
+        return await self._clean_and_summarize_text(text=content, filename="Document", doc_type="document")  
