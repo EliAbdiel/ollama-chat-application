@@ -6,8 +6,9 @@ from src.utils.config import DEFAULT_MODEL, VISION_MODEL
 class ProcessingConfig:
     """Configuration for DocumentProcessor"""
     max_file_size: int = 100 * 1024 * 1024  # 100MB default
-    text_extract_limit: int = 10000
-    temperature: float = 0.0
+    text_extract_limit: int = 8000
+    temperature: float = 0.01
+    num_ctx: int = 512
     ollama_model: str = DEFAULT_MODEL
     vision_model: str = VISION_MODEL
     allowed_extensions: Optional[Set[str]] = None
