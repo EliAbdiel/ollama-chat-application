@@ -1,11 +1,12 @@
 from chainlit.data.sql_alchemy import SQLAlchemyDataLayer
-from chainlit.data.storage_clients.azure_blob import AzureBlobStorageClient
 from src.utils.config import (
     DATABASE,
     CONTAINER,
-    STORAGE_ACCOUNT,
     STORAGE_SECRET,
+    STORAGE_ACCOUNT,
 )
+from chainlit.data.storage_clients.azure_blob import AzureBlobStorageClient
+
 
 storage_client = AzureBlobStorageClient(
     container_name=CONTAINER,
