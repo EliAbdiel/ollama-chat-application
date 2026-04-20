@@ -1,11 +1,12 @@
 import chainlit as cl
-from ollama import AsyncClient
-from src.log.logger import setup_logger
 from src.utils.config import (
     DEFAULT_MODEL,
     OLLAMA_API_KEY,
     OLLAMA_BASE_URL,
 )
+from src.log.logger import setup_logger
+from ollama import AsyncClient, ChatResponse
+from typing import AsyncIterator, List, Dict
 
 logger = setup_logger('CALL MODEL')
 
@@ -14,8 +15,9 @@ client = AsyncClient(
     headers={"Authorization": f"Bearer {OLLAMA_API_KEY}"},
 )
 
+
 @cl.step(name="ollama", type="tool", show_input=False)
-async def call_ollama(model, messages) -> str:
+async def call_ollama(model: str, messages: List[Dict]) -> str:
     """
     Calls the Ollama model with the provided messages and handles tool calls via MCP.
     
@@ -36,27 +38,51 @@ async def call_ollama(model, messages) -> str:
     logger.info(f"Available MCP Tools: {[tool['function']['name'] for tool in all_tools]}")
     
     try:
-        final_response = None
-
         while True:
             try:
-                result = await client.chat(model=model, messages=messages, tools=all_tools)
+                result: AsyncIterator[ChatResponse] = await client.chat(
+                    model=model,
+                    messages=messages,
+                    tools=all_tools,
+                    stream=True,
+                    options={
+                        'temperature': 0.01,
+                        'num_ctx':512,
+                    },
+                )
             except Exception as e:
-                logger.error(f'Error during chat call: {e}')
+                logger.error(f'Error during ollama call: {e}')
                 break
-
-            if result.message.content:
-                logger.info(f"Received content: {str(result.message.content)[:1000]}...")
-                final_response = "\n\n".join([result.message.content])
             
-            messages.append(result.message)
+            # thinking = ''
+            content = ''
+            tool_calls = []
+                
+            async for part in result:
+                if part.message.tool_calls:
+                    tool_calls.extend(part.message.tool_calls)
+                if part.message.content:
+                    # accumulate the partial content
+                    content += part.message.content
+                    yield part.message.content
+            
+            if content != '' or len(tool_calls) > 0:
+                # append the accumulated fields to the messages for the next request
+                messages.append(
+                    {
+                        'role': 'assistant',
+                        # 'thinking': thinking,
+                        'content': str(content)[:2000 * 4],
+                        'tool_calls': tool_calls
+                    }
+                )
 
-            if result.message.tool_calls:
-                logger.info(f'Tool Calls: {result.message.tool_calls}')
-
-                for tool_call in result.message.tool_calls:
+            if tool_calls:
+                tool_executed = False
+                for tool_call in tool_calls:
                     tool_name = tool_call.function.name
                     tool_args = tool_call.function.arguments
+
                     logger.info(f"Executing tool: {tool_name}, with args: {tool_args}")
 
                     mcp_name = None
@@ -79,6 +105,7 @@ async def call_ollama(model, messages) -> str:
                                     'content': str(tool_result)[:2000 * 4],
                                     'tool_name': tool_name
                                 })
+                                tool_executed = True
                             else:
                                 logger.error(f'MCP session {mcp_name} not found')
                                 messages.append({
@@ -86,6 +113,7 @@ async def call_ollama(model, messages) -> str:
                                     'content': f'MCP session {mcp_name} not found',
                                     'tool_name': tool_name
                                 })
+                                tool_executed = True
                         except Exception as e:
                             logger.error(f'Error calling tool {tool_name}: {e}')
                             messages.append({
@@ -93,6 +121,7 @@ async def call_ollama(model, messages) -> str:
                                 'content': f'Error calling tool {tool_name}: {e}',
                                 'tool_name': tool_name
                             })
+                            tool_executed = True
                     else:
                         logger.error(f'Tool {tool_name} not found in any MCP connection')
                         messages.append({
@@ -100,14 +129,12 @@ async def call_ollama(model, messages) -> str:
                             'content': f'Tool {tool_name} not found in any MCP connection',
                             'tool_name': tool_name
                         })
+                        tool_executed = True
+
+                if not tool_executed:
+                    break
             else:
                 break  # No tool calls, conversation is complete
-        if final_response is not None:
-            logger.info(f'Final Response: {final_response[:1000]}...')
-            return final_response
-        else:
-            logger.warning('No final response generated')
-            return None
     except Exception as e:
         logger.error(f'Unexpected error during client initialization: {e}')
 
@@ -127,12 +154,13 @@ async def thread_renamed(thread_message: str) -> None:
             }
         ]
         
-        thread_name_response = await client.chat(model=DEFAULT_MODEL, messages=messages)
+        thread_name_response: ChatResponse = await client.chat(model=DEFAULT_MODEL, messages=messages)
 
         thread_name = thread_name_response.message.content
 
         await cl.context.emitter.init_thread(thread_name)
         cl.user_session.set("is_thread_renamed", True)
+
 
 async def model_name(profile:str) -> str:
     """
@@ -146,13 +174,13 @@ async def model_name(profile:str) -> str:
     """
     model_mapping = {
         "gpt-oss:120b-cloud": "gpt-oss:120b",
-        "deepseek-v3.1:671b-cloud": "deepseek-v3.1:671b",
-        "gemma3:27b-cloud": "gemma3:27b",
-        "qwen3-coder:480b-cloud": "qwen3-coder:480b",
-        "kimi-k2:1t-cloud": "kimi-k2:1t",
-        "glm-4.6:cloud": "glm-4.6",
-        "minimax-m2:cloud": "minimax-m2",
-        "mistral-large-3:675b-cloud": "mistral-large-3:675b",
+        "deepseek-v3.2:cloud": "deepseek-v3.2:cloud",
+        "gemma4:31b-cloud": "gemma4:31b-cloud",
+        "qwen3.5:397b-cloud": "qwen3.5:397b-cloud",
+        "kimi-k2.5:cloud": "kimi-k2.5:cloud",
+        "glm-5.1:cloud": "glm-5.1:cloud",
+        "minimax-m2.7:cloud": "minimax-m2.7:cloud",
+        "mistral-large-3:675b-cloud": "mistral-large-3:675b-cloud",
     }
 
     if profile in model_mapping:
@@ -161,3 +189,43 @@ async def model_name(profile:str) -> str:
         # Return a default model if profile is None or not found
         logger.warning(f"Unknown chat profile: {profile}, using default model")
         return DEFAULT_MODEL
+
+
+@cl.step(name="synthesize", type="tool", show_input=False)
+async def synthesize_results(content:str):
+    """Combine results from multiple sources into a coherent answer."""
+    if not content:
+        raise Exception('Content extract is extrictly required')
+    
+    messages = [
+        {
+            'role': 'system',
+            'content': ("Synthesize these extract results.\n"\
+                "- Combine information from multiple sources without redundancy\n"\
+                "- Highlight the most relevant and actionable information\n"\
+                "- Note any discrepancies between sources\n"\
+                "- Keep the response concise and well-organized")
+        },
+        {
+            'role': 'user',
+            'content': content
+        },
+    ]
+    
+    try:
+        result: AsyncIterator[ChatResponse] = await client.chat(
+            model=DEFAULT_MODEL,
+            messages=messages,
+            stream=True,
+            options={
+                'temperature': 0.01,
+                'num_ctx':512,
+            },
+        )
+
+        async for part in result:
+            if part.message.content:
+                yield part.message.content
+                
+    except Exception as e:
+        logger.error(f'Error during synthesize results: {e}')

@@ -1,6 +1,13 @@
 import json
+import time
 import chainlit as cl
 from mcp import ClientSession
+from src.llm.call_model import (
+    model_name,
+    call_ollama,
+    thread_renamed,
+    synthesize_results,
+)
 from src.utils.config import COMMANDS
 from chainlit.types import ThreadDict
 from typing import Dict, Optional, Any
@@ -8,7 +15,6 @@ from src.log.logger import setup_logger
 from src.ui.commands import command_list
 from src.ui.chat_resume import resume_chats
 from src.ui.chat_profiles import list_of_profiles
-from src.llm.call_model import call_ollama, thread_renamed, model_name
 from src.document.document_processor import DocumentProcessor
 from src.database.persistent_data_layer import init_data_layer
 from src.llm.speech_to_text import audio_chunk, audio_transcription
@@ -192,8 +198,9 @@ async def on_audio_end() -> None:
             type="user_message"
         )
         
-        await user_message.send()
         await thread_renamed(transcription)
+        time.sleep(1)
+        await user_message.send()
         await on_message(user_message)
         return True
 
@@ -216,6 +223,8 @@ async def on_message(user_message: cl.Message) -> None:
     user_message : Message
         The incoming message with potential file attachments.
     """
+    chat_history = cl.user_session.get("chat_history", [])
+
     if not user_message:
         logger.error("Received invalid or None message")
         return
@@ -256,8 +265,16 @@ async def on_message(user_message: cl.Message) -> None:
 
         if user_message.command in COMMANDS:
             logger.info(f"Processing user command: {user_message.command}, with {len(results['success'])} file summaries")
-            await cl.Message(content=combined_content).send()
+            
+            msg = cl.Message(content="")
+            
+            async for part in synthesize_results(combined_content):
+                await msg.stream_token(part)
+            
+            chat_history.append({'role': 'assistant', 'content': msg.content})
             logger.info("Sent file summaries to user successfully")
+            cl.user_session.set("chat_history", chat_history)
+            await msg.update()
             return
 
         user_message.content = (
@@ -280,8 +297,6 @@ async def on_message(user_message: cl.Message) -> None:
         return
     
     logger.info(f"Using model: {model}")
-
-    chat_history = cl.user_session.get("chat_history", [])
     
     chat_history.append({"role": "user", "content": user_message.content})
     logger.info(f"Chat history before call llm: {chat_history}")
@@ -290,16 +305,21 @@ async def on_message(user_message: cl.Message) -> None:
 
         if user_message.command in COMMANDS or user_message.command is None:
             logger.info(f"Processing user message: {user_message.content}, with command: {user_message.command}")
-            response = await call_ollama(model=model, messages=chat_history)
+            msg = cl.Message(content='')
+            # response = await call_ollama(model=model, messages=chat_history)
         
-        if not response:
-            logger.warning("Empty response from Ollama")
-            await cl.Message(content="I apologize, but I couldn't generate a response. Please try again.").send()
+            async for part in call_ollama(model=model, messages=chat_history):
+            # if token := part or "":
+                await msg.stream_token(part)
+
+        # if not response:
+        #     logger.warning("Empty response from Ollama")
+        #     await cl.Message(content="I apologize, but I couldn't generate a response. Please try again.").send()
     
-        chat_history.append({"role": "assistant", "content": response})
-        logger.info(f"Chat history after call llm: {chat_history}")
+        chat_history.append({'role': 'assistant', 'content': msg.content})
+        logger.info('Assistant response successfully')
         cl.user_session.set("chat_history", chat_history)
-        await cl.Message(content=response).send()
+        await msg.update()
 
     except Exception as e:
         logger.error(f"Unexpected error in on_message: {e}")
