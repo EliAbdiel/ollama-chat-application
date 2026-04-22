@@ -16,9 +16,13 @@ This guide helps you understand, configure, and extend the Ollama-powered Chainl
 
 - [ElevenLabs API Key](https://elevenlabs.io/pricing/api)
 
-- [PostgreSQL](https://www.postgresql.org/download/)
+- [PostgreSQL installer](https://www.postgresql.org/download/) or [Supabase](https://supabase.com/docs/guides/database/connecting-to-postgres#pooler-session-mode)
 
-- [Create an Auth0 Application](https://auth0.com/docs/get-started/auth0-overview/create-applications)
+- Create an [Auth0 app](https://auth0.com/docs/get-started/auth0-overview/create-applications) or [GitHub OAuth app](https://github.com/settings/apps)
+
+- [Create an Azure storage account](https://learn.microsoft.com/en-us/azure/storage/common/storage-account-create?toc=%2Fazure%2Fstorage%2Fblobs%2Ftoc.json&tabs=azure-portal) (optional)
+
+- [Railway Account](https://railway.com/) (optional)
 
 - Code editor of choice
 
@@ -126,7 +130,7 @@ STORAGE_KEY=yourkey
 
 - Start your Ollama server and ensure `OLLAMA_BASE_URL` is reachable.
 - Confirm models referenced in your configuration are available on your Ollama server.
-- Launch the app: `chainlit run main.py -w`.
+- Launch the app: `chainlit run main.py -h`.
 - Open the UI in your browser; select a chat profile, and start chatting or upload files.
 
 ## Chat Profiles
@@ -267,9 +271,11 @@ CREATE TABLE IF NOT EXISTS feedbacks (
     FOREIGN KEY ("threadId") REFERENCES threads("id") ON DELETE CASCADE
 );
 
-ALTER TABLE elements ADD COLUMN "autoPlay" BOOLEAN DEFAULT false;
+ALTER TABLE elements ADD COLUMN IF NOT EXISTS "autoPlay" BOOLEAN DEFAULT false;
 
--- ALTER TABLE steps ADD COLUMN "defaultOpen" BOOLEAN DEFAULT false;
+ALTER TABLE steps ADD COLUMN IF NOT EXISTS "autoCollapse" BOOLEAN DEFAULT false;
+
+ALTER TABLE steps ADD COLUMN IF NOT EXISTS "defaultOpen" BOOLEAN DEFAULT false;
 ```
 
 ## Logging
@@ -296,7 +302,7 @@ You can tweak these without code changes to adjust the front-end experience and 
 ## Common Tasks
 
 - Install dependencies: `pip install .` or `uv pip sync`.
-- Run dev server: `chainlit run main.py -w`.
+- Run dev server: `chainlit run main.py -h`.
 - Change the welcome screen: edit `chainlit.md`.
 - Add a chat profile: edit `src/ui/chat_profiles.py` and `src/llm/call_model.py`.
 - Tune document processing: adjust `src/document/processor_config.py`.
@@ -322,9 +328,68 @@ You can tweak these without code changes to adjust the front-end experience and 
 - New tools: run an MCP server exposing your functions; the app auto-discovers tools on connect.
 - Security: consider tightening upload `accept` types and lowering size limits in `.chainlit/config.toml` for production.
 
+## Deploying your project from GitHub
+
+>Railway is an all-in-one intelligent cloud provider that makes it easy to provision infrastructure, develop locally, and deploy to the cloud.
+
+To get started deploying your *ollama chat application*, it is recommended to [forking](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/working-with-forks/fork-a-repo) the previously configure [chainlit app](https://github.com/EliAbdiel/ollama-chat-application.git) repository so that you can follow along.
+
+First make a [new project](https://docs.railway.com/overview/the-basics#project--project-canvas).
+
+- Open up the [dashboard](https://docs.railway.com/overview/the-basics#dashboard--projects) $\rightarrow$ Click **New Project**.
+
+- Choose the **GitHub repo** option.
+
+   ![New project and choose the GitHub repo](/public/railway/railway-new-project.png)
+
+   >Railway requires a valid GitHub account to be linked. If your Railway account isn't associated with one, you will be prompted to link it.
+
+- Search for your GitHub project and click on it.
+
+   ![Search for your github project](/public/railway/search-your-github-project.png)
+
+- Choose either **Deploy Now** or **Add variables**.
+
+    *Deploy Now* will immediately start to build and deploy your selected repo.
+
+    *Add Variables* will bring you to your service and ask you to add variables, when done you will need to click the Deploy button at the top of your canvas to initiate the first deployment.
+
+   ![Deploy now or add variables](/public/railway/deploy-or-add-variables.png)
+
+- Expose your Railway services to the internet via `HTTP`/`HTTPS`.
+
+    1. Go to your service's **Settings**.
+    2. Find **Networking** $\rightarrow$ **Public Networking**.
+    3. Click **Generate Domain** to get a Railway-provided domain.
+
+   ![Public networking](/public/railway/public-networking.png)
+
+- Override the detected *start command* by setting a value in your service **Settings**.
+
+   Go to your service's **Settings** $\rightarrow$ **Deploy** $\rightarrow$ **Custom Start Command**
+
+   ![Custom start command](/public/railway/start-command.png)
+
+- Set the `CHAINLIT_URL` environment variable. For instance, if you host your application at `https://mydomain.com`, `CHAINLIT_URL` should be set to `https://mydomain.com`
+
+- Go to your GitHub OAuth apps, set the callback URL should be: `CHAINLIT_URL/auth/oauth/github/callback`.
+
+   ![GitHub OAuth app](/public/railway/chainlit-url.png)
+
+- Test your deployed app
+
+   ![Test deploy chat](/public/gif/streaming-response.gif)
+
 ## References
 
-- [Chainlit docs](https://docs.chainlit.io/get-started/overview)
-- [Ollama docs](https://docs.ollama.com/cloud)
+- [Chainlit documentation](https://docs.chainlit.io/get-started/overview)
+
+- [Ollama documentation](https://docs.ollama.com/cloud)
+
 - [Create a new GitHub OAuth app](https://docs.github.com/en/apps/creating-github-apps/about-creating-github-apps/about-creating-github-apps#building-a-github-app)
+
 - [Create an Auth0 application](https://auth0.com/docs/get-started/auth0-overview/create-applications)
+
+- [Azure Storage documentation](https://learn.microsoft.com/en-us/azure/storage/)
+
+- [Railway documentation](https://docs.railway.com/quick-start)
